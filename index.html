@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <title>Hệ Mặt Trời Trái Tim - Thiên Hà Rực Rỡ</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; cursor: pointer; }
+        #info {
+            position: absolute; top: 20px; width: 100%; text-align: center;
+            color: #f8bbd0; font-family: 'Segoe UI', sans-serif; pointer-events: none;
+            text-shadow: 0 0 10px rgba(255, 105, 180, 0.9);
+            z-index: 10;
+        }
+    </style>
+</head>
+<body>
+    <audio id="music" loop playsinline webkit-playsinline>
+        <source src="nhac.mp3" type="audio/mpeg">
+    </audio>
+    <div id="info">💖 Chúc mừng ngày 8/3 - Trái tim của Mẹ 💖<br><small>Hành tinh trái tim 3D giữa Thiên Hà lấp lánh & Mưa sao băng</small></div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        let scene, camera, renderer, controls, raycaster, mouse;
+        let heartParticles, ringParticles, photoGroup, galaxySkybox;
+        let twinklingStars, shootingStars = [];
+        const photos = [];
+        let selectedPhoto = null;
+
+        const IMAGE_SOURCES = ['anh1.jpg', 'anh2.jpg', 'anh3.jpg', 'anh4.jpg', 'anh5.jpg', 'anh6.jpg', 'anh7.jpg', 'anh8.jpg', 'anh9.jpg', 'anh10.jpg'];
+        const HEART_SIZE_BASE = 45; 
+
+        function createBlurryParticle() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 64; canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+            const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+            gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
+            gradient.addColorStop(0.3, 'rgba(255, 105, 180, 0.8)');
+            gradient.addColorStop(0.6, 'rgba(199, 21, 133, 0.2)');
+            gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, 64, 64);
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        const particleTexture = createBlurryParticle();
+
+        // 1. CLASS SAO BĂNG (Giữ nguyên từ bản trước)
+        class ShootingStar {
+            constructor() {
+                const geometry = new THREE.BufferGeometry();
+                const positions = new Float32Array(2 * 3);
+                geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                const material = new THREE.LineBasicMaterial({ color: 0xfff0f5, transparent: true, opacity: 1 });
+                this.line = new THREE.Line(geometry, material);
+                this.reset();
+                scene.add(this.line);
+            }
+
+            reset() {
+this.startPos = new THREE.Vector3((Math.random() - 0.5) * 1200, 500 + Math.random() * 200, (Math.random() - 0.5) * 1200);
+                this.endPos = this.startPos.clone();
+                this.velocity = new THREE.Vector3(-15 - Math.random() * 20, -15 - Math.random() * 20, (Math.random() - 0.5) * 10);
+                this.life = 0;
+                this.maxLife = 30 + Math.random() * 40;
+                this.line.material.opacity = 1;
+            }
+
+            update() {
+                this.life++;
+                this.startPos.add(this.velocity);
+                this.endPos.add(this.velocity.clone().multiplyScalar(0.92)); 
+                const positions = this.line.geometry.attributes.position.array;
+                positions[0] = this.startPos.x; positions[1] = this.startPos.y; positions[2] = this.startPos.z;
+                positions[3] = this.endPos.x; positions[4] = this.endPos.y; positions[5] = this.endPos.z;
+                this.line.geometry.attributes.position.needsUpdate = true;
+                this.line.material.opacity = 1 - (this.life / this.maxLife);
+                if (this.life >= this.maxLife) this.reset();
+            }
+        }
+
+        init();
+        animate();
+
+        function init() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 4000); // Tăng clipping plane để thấy Skybox
+            camera.position.set(0, 120, 300); 
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            document.body.appendChild(renderer.domElement);
+
+            // 2. TẠO THIÊN HÀ NỀN (NÂNG CẤP CHÍNH)
+            // Khởi tạo CubeTextureLoader
+            const cubeLoader = new THREE.CubeTextureLoader();
+            // Thiết lập đường dẫn cơ bản đến thư mục chứa ảnh Skybox
+            cubeLoader.setPath('https://threejs.org/examples/textures/cube/MilkyWay/');
+
+            // Tải 6 ảnh tương ứng với 6 mặt của khối lập phương (Skybox)
+            // Tên file thường là: posx (phải), negx (trái), posy (trên), negy (dưới), posz (trước), negz (sau)
+            galaxySkybox = cubeLoader.load([
+                'dark-s_px.jpg', 'dark-s_nx.jpg',
+                'dark-s_py.jpg', 'dark-s_ny.jpg',
+                'dark-s_pz.jpg', 'dark-s_nz.jpg'
+            ]);
+
+            // Gán CubeTexture làm nền của toàn bộ Cảnh (Scene)
+            scene.background = galaxySkybox;
+
+            // 3. TRÁI TIM 3D ĐỨNG THẲNG
+            const heartParticleCount = 25000;
+            const heartPos = [];
+            for (let i = 0; i < heartParticleCount; i++) {
+                const u = Math.random() * Math.PI * 2;
+                const v = Math.random() * Math.PI;
+                const dist = HEART_SIZE_BASE + (Math.random() - 0.5) * 10;
+let x = dist * Math.sin(v) * (Math.pow(Math.sin(u), 3));
+                let y = dist * Math.sin(v) * ((13 * Math.cos(u) - 5 * Math.cos(2 * u) - 2 * Math.cos(3 * u) - Math.cos(4 * u)) / 16);
+                let z = (dist * Math.cos(v) / 2) * (Math.random() - 0.5) * 1.5; 
+                heartPos.push(x, y, z);
+            }
+            const heartGeo = new THREE.BufferGeometry();
+            heartGeo.setAttribute('position', new THREE.Float32BufferAttribute(heartPos, 3));
+            heartParticles = new THREE.Points(heartGeo, new THREE.PointsMaterial({
+                size: 2.2, color: 0xFF1493, map: particleTexture, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false
+            }));
+            scene.add(heartParticles);
+
+            // 4. VÀNH ĐAI HÀNH TINH
+            const ringCount = 18000;
+            const ringPos = [];
+            for (let i = 0; i < ringCount; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const radius = 95 + Math.random() * 45;
+                const x = Math.cos(angle) * radius;
+                const z = Math.sin(angle) * radius;
+                const y = (Math.random() - 0.5) * 10; 
+                ringPos.push(x, y, z);
+            }
+            const ringGeo = new THREE.BufferGeometry();
+            ringGeo.setAttribute('position', new THREE.Float32BufferAttribute(ringPos, 3));
+            ringParticles = new THREE.Points(ringGeo, new THREE.PointsMaterial({
+                size: 1.5, color: 0xda70d6, map: particleTexture, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false
+            }));
+            scene.add(ringParticles);
+
+            // 5. SAO LẤP LÁNH (Nâng cấp độ sáng để nổi bật trên nền thiên hà)
+            const starGeo = new THREE.BufferGeometry();
+            const starPositions = new Float32Array(8000 * 3);
+            for(let i = 0; i < 24000; i++) starPositions[i] = (Math.random() - 0.5) * 2500;
+            starGeo.setAttribute('position', new THREE.Float32BufferAttribute(starPositions, 3));
+            const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 1.8, transparent: true, map: particleTexture, blending: THREE.AdditiveBlending });
+            twinklingStars = new THREE.Points(starGeo, starMat);
+            scene.add(twinklingStars);
+
+            // 6. KHỞI TẠO MƯA SAO BĂNG (15 ngôi sao)
+            for(let i = 0; i < 15; i++) shootingStars.push(new ShootingStar());
+
+            // 7. ẢNH KỶ NIỆM (10 ảnh)
+            photoGroup = new THREE.Group();
+            const loader = new THREE.TextureLoader();
+            IMAGE_SOURCES.forEach((url, i) => {
+                loader.load(url, (texture) => {
+                    const material = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
+                    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(24, 30), material);
+const angle = (i / IMAGE_SOURCES.length) * Math.PI * 2;
+                    mesh.position.set(Math.cos(angle) * 130, 15, Math.sin(angle) * 130);
+                    photoGroup.add(mesh);
+                    photos.push(mesh);
+                });
+            });
+            scene.add(photoGroup);
+
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.autoRotate = true; 
+            controls.autoRotateSpeed = 0.4;
+            controls.enableDamping = true;
+            controls.minDistance = 100; // Ngăn camera chui vào trong trái tim
+            controls.maxDistance = 600; // Ngăn camera đi ra ngoài Skybox
+
+            raycaster = new THREE.Raycaster(); mouse = new THREE.Vector2();
+            window.addEventListener('click', onClick); 
+            window.addEventListener('touchstart', onClick);
+            window.addEventListener('resize', onResize);
+        }
+
+        function onClick(event) {
+
+    // phát nhạc khi click lần đầu
+    const music = document.getElementById("music");
+    if (music && music.paused) {
+        music.play().catch(()=>{});
+    }
+
+    if (selectedPhoto) { 
+        selectedPhoto = null; 
+        controls.autoRotate = true; 
+        return; 
+    }
+    let x, y;
+
+if (event.touches) {
+    x = event.touches[0].clientX;
+    y = event.touches[0].clientY;
+} else {
+    x = event.clientX;
+    y = event.clientY;
+}
+   mouse.x = (x / window.innerWidth) * 2 - 1;
+mouse.y = -(y / window.innerHeight) * 2 + 1;
+
+    raycaster.setFromCamera(mouse, camera);
+
+    const intersects = raycaster.intersectObjects(photos);
+
+    if (intersects.length > 0) { 
+        selectedPhoto = intersects[0].object; 
+        controls.autoRotate = false; 
+    }
+}
+
+        function onResize() { 
+            camera.aspect = window.innerWidth / window.innerHeight; 
+            camera.updateProjectionMatrix(); 
+            renderer.setSize(window.innerWidth, window.innerHeight); 
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const time = Date.now() * 0.001;
+
+            // Nhịp đập trái tim
+            if (heartParticles) {
+                heartParticles.rotation.y += 0.002; 
+                let pulse = 1 + 0.12 * Math.pow(Math.sin(time * 3), 3); 
+                heartParticles.scale.set(pulse, pulse, pulse);
+                heartParticles.material.opacity = 0.7 + 0.3 * Math.sin(time * 3);
+            }
+
+            // Sao lấp lánh (Twinkle effect mạnh hơn)
+            if (twinklingStars) {
+                twinklingStars.material.opacity = 0.6 + 0.4 * Math.abs(Math.sin(time * 1.5));
+            }
+
+            // Cập nhật mưa sao băng
+            shootingStars.forEach(s => s.update());
+
+            if (ringParticles) ringParticles.rotation.y -= 0.001;
+            if (!selectedPhoto && photoGroup) photoGroup.rotation.y += 0.004;
+
+            photos.forEach(p => {
+                if (p === selectedPhoto) {
+                    p.scale.lerp(new THREE.Vector3(3.2, 3.2, 3.2), 0.1); 
+                    p.lookAt(camera.position); 
+                } else {
+                    p.scale.lerp(new THREE.Vector3(1, 1, 1), 0.1);
+                    p.lookAt(camera.position.x, p.position.y, camera.position.z);
+                }
+            });
+
+            controls.update(); 
+            renderer.render(scene, camera);
+}
+    </script>
+</body>
+</html>
